@@ -542,6 +542,79 @@ No changes to [train.py](cci:7://file:///d:/personal%20projects/samsung/BasicSR/
 - I can draft two ready-to-run YAMLs for your dataset structure and patch size.
 - Tell me:
   - Your LR/LQ data folders, patch size, batch size, and desired discriminator (VGGStyle 128 vs UNet SN).
-  - Target iteration counts for stage 1 and stage 2. 
+  - Target iteration counts for stage 1 and stage 2.
 
 Summary: Use [SRModel](cci:2://file:///d:/personal%20projects/samsung/BasicSR/basicsr/models/sr_model.py:13:0-278:53) with RRDBNet and L1 for stage 1, then [SRGANModel](cci:2://file:///d:/personal%20projects/samsung/BasicSR/basicsr/models/srgan_model.py:10:0-148:53) with the same RRDBNet, a discriminator, and GAN loss for stage 2, wiring everything in YAML. Only add code if you want a one-run two-stage model or a custom discriminator/loss.
+
+Architecture dimensions issues resolve methods:
+
+1. You're hitting the classic “not divisible by 2^n” issue. After 4 downsamples, 136 / 16 = 8.5, so the encoder floors to 8 while the decoder scales back by powers of 2 to 128. Skip/add ops then misalign.
+
+Here are robust options (pick 1–2 and you’re done):
+
+# Recommended fixes
+
+- __Pad to multiple-of-16 before the encoder, crop at the end (recommended)__
+  Ensure the spatial size after unshuffle is divisible by 16 (2^4). Pad once up front; unpad at the end. This keeps all skip/add shapes consistent.
+  ```python
+  import torch.nn.functional as F
+
+  def pad_to_multiple(x, multiple=16, mode='reflect'):
+      n, c, h, w = x.size()
+      pad_h = (multiple - h % multiple) % multiple
+      pad_w = (multiple - w % multiple) % multiple
+      if pad_h or pad_w:
+          x = F.pad(x, (0, pad_w, 0, pad_h), mode=mode)  # left,right,top,bottom
+      return x, (pad_h, pad_w)
+
+  def unpad(x, pad_hw):
+      pad_h, pad_w = pad_hw
+      if pad_h or pad_w:
+          x = x[..., :x.shape[-2]-pad_h, :x.shape[-1]-pad_w]
+      return x
+  ```
+  - Apply right after unshuffle (so the post-unshuffle H,W are multiples of 16).
+  - Decode back to the padded size, then crop with `unpad` to the original 136.
+
+- __Size-driven upsampling at each skip connection__
+  Instead of `scale_factor=2`, upsample to the exact spatial size of the skip tensor. This avoids off-by-one drift.
+  ```python
+  # inside decoder block
+  x = F.interpolate(x, size=skip.shape[-2:], mode='bilinear', align_corners=False)
+  x = x + skip  # or torch.cat then conv
+  ```
+  If you use ConvTranspose2d, set `output_padding` to match the desired size:
+  ```python
+  up = nn.ConvTranspose2d(C, C2, kernel_size=2, stride=2)
+  # after forward:
+  # x = up(x)
+  # if x.shape[-2:] != skip.shape[-2:]:
+  #     x = F.interpolate(x, size=skip.shape[-2:], mode='bilinear', align_corners=False)
+  ```
+
+- __Crop or pad skip features before addition (UNet-style)__
+  If shapes differ by 1 pixel, center-crop the skip to the decoder tensor size (or pad the decoder). Cropping loses only border pixels:
+  ```python
+  def match_and_add(x_dec, x_skip):
+      if x_dec.shape[-2:] != x_skip.shape[-2:]:
+          x_skip = x_skip[..., :x_dec.size(2), :x_dec.size(3)]
+      return x_dec + x_skip
+  ```
+
+# Architecture-specific notes
+
+- __Unshuffle interaction__: If you pixel-unshuffle by r, your constraint becomes (H/r, W/r) divisible by 2^depth. If not, either:
+  - pad after unshuffle to multiple-of-16, or
+  - reduce the number of downsampling stages, or
+  - choose r to make (H/r) divisible by 16.
+
+- __Consistency__: Using size-driven interpolate on every up block plus initial padding is the most robust and avoids shape drift across stages.
+
+# Minimal change that works well
+- Add padding after unshuffle to make H,W % 16 == 0.
+- In each up block, interpolate with `size=skip.shape[-2:]` before add/concat.
+- Crop the final output back to the original 136×136.
+
+If you paste a small snippet of your AICNet forward (encoder/decoder blocks and skip joins), I can show the exact lines to tweak.
+
+Summary: The mismatch comes from 136 not being divisible by 16. Pad to a multiple of 16 after unshuffle, upsample to exact skip sizes, and crop at the end. This eliminates shape mismatches cleanly.
