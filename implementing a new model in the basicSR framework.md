@@ -361,6 +361,10 @@ Summary: Use BasicSR to train a mobile-suitable model (ECBSR/SRVGG), quantize (p
 
 *Viewed [train_MSRGAN_x4.yml](file:///d:/personal%20projects/samsung/BasicSR/options/train/SRResNet_SRGAN/train_MSRGAN_x4.yml) *
 
+
+
+-----------------------------------------------------------------------------------------------------------------------------
+
 ### User Input
 
 Now suppose i have a model ready for use in @[basicsr/models]. now i need to include the RRDBnet architecture with l1 loss and 2 stage training of the generator using gan and a discriminator of a relevant choice. now where to write what code. please explain me in details
