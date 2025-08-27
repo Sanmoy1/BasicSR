@@ -68,8 +68,12 @@ class RealESRGANModel(SRGANModel):
     @torch.no_grad()
     def feed_data(self, data):
         """Accept data from dataloader, and then add two-order degradations to obtain LQ images.
+
         """
-        if self.is_train and self.opt.get('high_order_degradation', True):
+        #data_type can be 'paired', 'unpaired' or None
+        data_type=data.get('data_type')
+        
+        if self.is_train and self.opt.get('high_order_degradation', True) and (data_type=='unpaired' or data_type is None):
             # training data synthesis
             self.gt = data['gt'].to(self.device)
             self.gt_usm = self.usm_sharpener(self.gt)

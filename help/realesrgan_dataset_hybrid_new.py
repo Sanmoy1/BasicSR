@@ -61,7 +61,7 @@ class RealESRGANHybridDataset(data.Dataset):
         self.unpaired_paths = []
         if 'dataroot_gt_unpaired' in opt and opt['dataroot_gt_unpaired']:
             self.gt_folder_unpaired = opt['dataroot_gt_unpaired']
-
+            
             if self.io_backend_opt['type'] == 'lmdb':
                 # LMDB backend for unpaired data
                 if not self.gt_folder_unpaired.endswith('.lmdb'):
@@ -75,14 +75,12 @@ class RealESRGANHybridDataset(data.Dataset):
                         paths = [line.strip().split(' ')[0] for line in fin]
                         self.unpaired_paths = [os.path.join(self.gt_folder_unpaired, v) for v in paths]
 
-        self.paths=self.unpaired_paths + self.paired_paths
-
         # Initialize paired data paths (LQ-GT pairs)
         self.paired_paths = []
         if 'dataroot_paired' in opt and opt['dataroot_paired']:
             self.paired_folder = opt['dataroot_paired']
             self.filename_tmpl = opt.get('filename_tmpl', '{}')
-
+            
             if self.io_backend_opt['type'] == 'lmdb':
                 # LMDB backend for paired data (not commonly used with single folder approach)
                 raise NotImplementedError("LMDB backend not supported with single paired folder approach. Use separate GT/LQ folders or disk backend.")
@@ -105,8 +103,16 @@ class RealESRGANHybridDataset(data.Dataset):
                 else:
                     raise ValueError(f"When using single paired folder without meta_info_paired, GT and LQ subfolders must exist at {gt_subfolder} and {lq_subfolder}")
 
-        #unpaired and paired paths are combined
-        self.paths=self.unpaired_paths + self.paired_paths
+        # Combine unpaired and paired paths with proper data type marking
+        self.paths = []
+        # Add unpaired paths with data_type marker
+        for path in self.unpaired_paths:
+            self.paths.append({'gt_path': path, 'data_type': 'unpaired'})
+        # Add paired paths with data_type marker
+        for path in self.paired_paths:
+            path['data_type'] = 'paired'
+            self.paths.append(path)
+            
         # Total dataset size
         self.total_unpaired = len(self.unpaired_paths)
         self.total_paired = len(self.paired_paths)
@@ -142,49 +148,55 @@ class RealESRGANHybridDataset(data.Dataset):
             self.pulse_tensor[10, 10] = 1
 
     def _load_unpaired_data(self, index):
-        """Load unpaired data and generate synthetic degradation kernels."""
+        """Load unpaired GT data and generate synthetic degradation kernels."""
+        # Get path info
+        path_info = self.paths[index]
+        gt_path = path_info['gt_path']
+        
         if self.file_client is None:
             self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
-
-        # Load GT image
-        gt_path = self.unpaired_paths[index % self.total_unpaired]
+        
+        # Load GT image with retry mechanism
         retry = 3
         while retry > 0:
             try:
                 img_bytes = self.file_client.get(gt_path, 'gt')
+                break
             except (IOError, OSError) as e:
                 logger = get_root_logger()
                 logger.warn(f'File client error: {e}, remaining retry times: {retry - 1}')
-                index = random.randint(0, self.total_unpaired - 1)
-                gt_path = self.unpaired_paths[index]
+                index = random.randint(0, len(self.paths) - 1)
+                path_info = self.paths[index]
+                if path_info['data_type'] == 'unpaired':
+                    gt_path = path_info['gt_path']
+                else:
+                    gt_path = path_info['gt_path']
                 time.sleep(1)
-            else:
-                break
             finally:
                 retry -= 1
-
+        
         img_gt = imfrombytes(img_bytes, float32=True)
-
+        
         # Augmentation
         img_gt = augment(img_gt, self.opt['use_hflip'], self.opt['use_rot'])
-
+        
         # Crop or pad to specified size
         h, w = img_gt.shape[0:2]
         crop_pad_size = self.opt.get('gt_size', 400)
-
+        
         # Pad if needed
         if h < crop_pad_size or w < crop_pad_size:
             pad_h = max(0, crop_pad_size - h)
             pad_w = max(0, crop_pad_size - w)
             img_gt = cv2.copyMakeBorder(img_gt, 0, pad_h, 0, pad_w, cv2.BORDER_REFLECT_101)
-
+        
         # Crop if needed
         if img_gt.shape[0] > crop_pad_size or img_gt.shape[1] > crop_pad_size:
             h, w = img_gt.shape[0:2]
             top = random.randint(0, h - crop_pad_size)
             left = random.randint(0, w - crop_pad_size)
             img_gt = img_gt[top:top + crop_pad_size, left:left + crop_pad_size, ...]
-
+        
         # Generate degradation kernels (same as RealESRGANDataset)
         # First degradation kernel
         kernel_size = random.choice(self.kernel_range)
@@ -199,10 +211,10 @@ class RealESRGANHybridDataset(data.Dataset):
                 self.kernel_list, self.kernel_prob, kernel_size,
                 self.blur_sigma, self.blur_sigma, [-math.pi, math.pi],
                 self.betag_range, self.betap_range, noise_range=None)
-
+        
         pad_size = (21 - kernel_size) // 2
         kernel = np.pad(kernel, ((pad_size, pad_size), (pad_size, pad_size)))
-
+        
         # Second degradation kernel
         kernel_size = random.choice(self.kernel_range)
         if np.random.uniform() < self.sinc_prob2:
@@ -216,10 +228,10 @@ class RealESRGANHybridDataset(data.Dataset):
                 self.kernel_list2, self.kernel_prob2, kernel_size,
                 self.blur_sigma2, self.blur_sigma2, [-math.pi, math.pi],
                 self.betag_range2, self.betap_range2, noise_range=None)
-
+        
         pad_size = (21 - kernel_size) // 2
         kernel2 = np.pad(kernel2, ((pad_size, pad_size), (pad_size, pad_size)))
-
+        
         # Final sinc kernel
         if np.random.uniform() < self.final_sinc_prob:
             kernel_size = random.choice(self.kernel_range)
@@ -228,12 +240,12 @@ class RealESRGANHybridDataset(data.Dataset):
             sinc_kernel = torch.FloatTensor(sinc_kernel)
         else:
             sinc_kernel = self.pulse_tensor
-
+        
         # Convert to tensor
         img_gt = img2tensor([img_gt], bgr2rgb=True, float32=True)[0]
         kernel = torch.FloatTensor(kernel)
         kernel2 = torch.FloatTensor(kernel2)
-
+        
         return {
             'gt': img_gt,
             'kernel1': kernel,
@@ -244,34 +256,34 @@ class RealESRGANHybridDataset(data.Dataset):
         }
 
     def _load_paired_data(self, index):
-        """Load paired LQ-GT data."""
-        if self.file_client is None:
-            self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
-
-        scale = self.opt['scale']
-
-        # Load GT and LQ images
-        path_info = self.paired_paths[index % self.total_paired]
+        """Load paired GT and LQ data."""
+        # Get path info
+        path_info = self.paths[index]
         gt_path = path_info['gt_path']
         lq_path = path_info['lq_path']
-
+        
+        if self.file_client is None:
+            self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
+        
+        # Load GT and LQ images
         img_bytes = self.file_client.get(gt_path, 'gt')
         img_gt = imfrombytes(img_bytes, float32=True)
-
+        
         img_bytes = self.file_client.get(lq_path, 'lq')
         img_lq = imfrombytes(img_bytes, float32=True)
-
+        
         # Augmentation for training
         if self.opt.get('phase', 'train') == 'train':
             gt_size = self.opt.get('gt_size', 256)
+            scale = self.opt['scale']
             # Random crop
             img_gt, img_lq = paired_random_crop(img_gt, img_lq, gt_size, scale, gt_path)
             # Flip, rotation
             img_gt, img_lq = augment([img_gt, img_lq], self.opt['use_hflip'], self.opt['use_rot'])
-
+        
         # Convert to tensor
         img_gt, img_lq = img2tensor([img_gt, img_lq], bgr2rgb=True, float32=True)
-
+        
         return {
             'lq': img_lq,
             'gt': img_gt,
@@ -281,28 +293,16 @@ class RealESRGANHybridDataset(data.Dataset):
         }
 
     def __getitem__(self, index):
-        """Get data item. Randomly choose between paired and unpaired data."""
-        # Decide whether to use paired or unpaired data
-        path=self.paths[index]
-        if path['gt_path']==path['lq_path']:
+        """Get data item based on the combined paths list."""
+        # Get path info from combined paths
+        path_info = self.paths[index % len(self.paths)]
+        
+        # Check data type and load accordingly
+        if path_info['data_type'] == 'paired':
             return self._load_paired_data(index)
-        else:
+        else:  # unpaired data
             return self._load_unpaired_data(index)
-        # if self.total_unpaired == 0:
-        #     # Only paired data available
-        #     return self._load_paired_data(index)
-        # elif self.total_paired == 0:
-        #     # Only unpaired data available
-        #     return self._load_unpaired_data(index)
-        # else:
-        #     # Both types available, choose randomly
-        #     if random.random() < self.unpaired_prob:
-        #         return self._load_unpaired_data(index)
-        #     else:
-        #         return self._load_paired_data(index)
 
     def __len__(self):
-        """Return the maximum length of both datasets."""
-        return max(self.total_unpaired, self.total_paired, 1)
-
-
+        """Return the total length of the combined dataset."""
+        return len(self.paths)
