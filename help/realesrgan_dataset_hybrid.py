@@ -70,12 +70,22 @@ class RealESRGANHybridDataset(data.Dataset):
                     self.unpaired_paths = [line.split('.')[0] for line in fin]
             else:
                 # Disk backend for unpaired data
+                # if 'meta_info_unpaired' in opt and opt['meta_info_unpaired']:
+                #     with open(opt['meta_info_unpaired']) as fin:
+                #         paths = [line.strip().split(' ')[0] for line in fin]
+                #         self.unpaired_paths = [os.path.join(self.gt_folder_unpaired, v) for v in paths]
+
+
+
+                # Disk backend for unpaired data
                 if 'meta_info_unpaired' in opt and opt['meta_info_unpaired']:
                     with open(opt['meta_info_unpaired']) as fin:
                         paths = [line.strip().split(' ')[0] for line in fin]
-                        self.unpaired_paths = [os.path.join(self.gt_folder_unpaired, v) for v in paths]
+                        # self.unpaired_paths = []
+                        for v in paths:
+                            gt_path = os.path.join(self.gt_folder_unpaired, v)
+                            self.unpaired_paths.append({'gt_path': gt_path, 'lq_path': gt_path})
 
-        self.paths=self.unpaired_paths + self.paired_paths
 
         # Initialize paired data paths (LQ-GT pairs)
         self.paired_paths = []
@@ -107,6 +117,8 @@ class RealESRGANHybridDataset(data.Dataset):
 
         #unpaired and paired paths are combined
         self.paths=self.unpaired_paths + self.paired_paths
+        self.total_paths=len(self.paths) #this is not needed right now
+
         # Total dataset size
         self.total_unpaired = len(self.unpaired_paths)
         self.total_paired = len(self.paired_paths)
@@ -141,20 +153,20 @@ class RealESRGANHybridDataset(data.Dataset):
             self.pulse_tensor = torch.zeros(21, 21).float()
             self.pulse_tensor[10, 10] = 1
 
-    def _load_unpaired_data(self, index):
+    def _load_unpaired_data(self, path_info):
         """Load unpaired data and generate synthetic degradation kernels."""
         if self.file_client is None:
             self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
 
         # Load GT image
-        gt_path = self.unpaired_paths[index % self.total_unpaired]
+        gt_path = path_info['gt_path']
         retry = 3
         while retry > 0:
             try:
                 img_bytes = self.file_client.get(gt_path, 'gt')
             except (IOError, OSError) as e:
                 logger = get_root_logger()
-                logger.warn(f'File client error: {e}, remaining retry times: {retry - 1}')
+                logger.warning(f'File client error: {e}, remaining retry times: {retry - 1}')
                 index = random.randint(0, self.total_unpaired - 1)
                 gt_path = self.unpaired_paths[index]
                 time.sleep(1)
@@ -283,11 +295,11 @@ class RealESRGANHybridDataset(data.Dataset):
     def __getitem__(self, index):
         """Get data item. Randomly choose between paired and unpaired data."""
         # Decide whether to use paired or unpaired data
-        path=self.paths[index]
-        if path['gt_path']==path['lq_path']:
-            return self._load_paired_data(index)
+        path_info=self.paths[index]
+        if path_info['gt_path']==path_info['lq_path']:
+            return self._load_paired_data(path_info)
         else:
-            return self._load_unpaired_data(index)
+            return self._load_unpaired_data(path_info)
         # if self.total_unpaired == 0:
         #     # Only paired data available
         #     return self._load_paired_data(index)
@@ -303,6 +315,6 @@ class RealESRGANHybridDataset(data.Dataset):
 
     def __len__(self):
         """Return the maximum length of both datasets."""
-        return max(self.total_unpaired, self.total_paired, 1)
+        return len(self.paths)
 
 
