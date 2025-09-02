@@ -188,6 +188,165 @@ class RealESRGANModel(SRGANModel):
                 self.gt = data['gt'].to(self.device)
                 self.gt_usm = self.usm_sharpener(self.gt)
 
+    {{ ... }}
+    @torch.no_grad()
+    def feed_data_paired_unpaired(self, data):
+        """Accept data from dataloader, and then add two-order degradations to obtain LQ images based on either paired
+        and unpaired dataset.
+
+        This function handles mixed batches where some samples are paired and others are unpaired.
+        For paired samples, LQ images are used directly.
+        For unpaired samples, synthetic degradation is applied to generate LQ images.
+        """
+        # Get batch size
+        batch_size = data['gt'].size(0)
+
+        # Initialize tensors to store results
+        gt_list = []
+        gt_usm_list = []
+        lq_list = []
+
+        # Process each sample in the batch individually
+        for i in range(batch_size):
+            # Extract single sample data
+            sample_data = {}
+            for key in data.keys():
+                if isinstance(data[key], torch.Tensor) and data[key].size(0) == batch_size:
+                    sample_data[key] = data[key][i:i+1]  # Keep batch dimension
+                elif key == 'data_type' and isinstance(data[key], list):
+                    sample_data[key] = data[key][i] if i < len(data[key]) else None
+                else:
+                    sample_data[key] = data[key]
+
+            # Get data type for this sample
+            data_type = sample_data.get('data_type')
+
+            # Process based on data type
+            if self.is_train and self.opt.get('high_order_degradation', True) and (data_type == 'unpaired' or data_type is None):
+                # Apply synthetic degradation for unpaired data
+
+                # Get GT image and apply USM sharpening
+                gt = sample_data['gt'].to(self.device)
+                gt_usm = self.usm_sharpener(gt)
+
+                # Get kernels
+                kernel1 = sample_data['kernel1'].to(self.device) if 'kernel1' in sample_data else data['kernel1'].to(self.device)
+                kernel2 = sample_data['kernel2'].to(self.device) if 'kernel2' in sample_data else data['kernel2'].to(self.device)
+                sinc_kernel = sample_data['sinc_kernel'].to(self.device) if 'sinc_kernel' in sample_data else data['sinc_kernel'].to(self.device)
+
+                ori_h, ori_w = gt.size()[2:4]
+
+                # ----------------------- The first degradation process ----------------------- #
+                # blur
+                out = filter2D(gt_usm, kernel1)
+                # random resize
+                updown_type = random.choices(['up', 'down', 'keep'], self.opt['resize_prob'])[0]
+                if updown_type == 'up':
+                    scale = np.random.uniform(1, self.opt['resize_range'][1])
+                elif updown_type == 'down':
+                    scale = np.random.uniform(self.opt['resize_range'][0], 1)
+                else:
+                    scale = 1
+                mode = random.choice(['area', 'bilinear', 'bicubic'])
+                out = F.interpolate(out, scale_factor=scale, mode=mode)
+                # add noise
+                gray_noise_prob = self.opt['gray_noise_prob']
+                if np.random.uniform() < self.opt['gaussian_noise_prob']:
+                    out = random_add_gaussian_noise_pt(
+                        out, sigma_range=self.opt['noise_range'], clip=True, rounds=False, gray_prob=gray_noise_prob)
+                else:
+                    out = random_add_poisson_noise_pt(
+                        out,
+                        scale_range=self.opt['poisson_scale_range'],
+                        gray_prob=gray_noise_prob,
+                        clip=True,
+                        rounds=False)
+                # JPEG compression
+                jpeg_p = out.new_zeros(out.size(0)).uniform_(*self.opt['jpeg_range'])
+                out = torch.clamp(out, 0, 1)
+                out = self.jpeger(out, quality=jpeg_p)
+
+                # ----------------------- The second degradation process ----------------------- #
+                # blur
+                if np.random.uniform() < self.opt['second_blur_prob']:
+                    out = filter2D(out, kernel2)
+                # random resize
+                updown_type = random.choices(['up', 'down', 'keep'], self.opt['resize_prob2'])[0]
+                if updown_type == 'up':
+                    scale = np.random.uniform(1, self.opt['resize_range2'][1])
+                elif updown_type == 'down':
+                    scale = np.random.uniform(self.opt['resize_range2'][0], 1)
+                else:
+                    scale = 1
+                mode = random.choice(['area', 'bilinear', 'bicubic'])
+                out = F.interpolate(
+                    out, size=(int(ori_h / self.opt['scale'] * scale), int(ori_w / self.opt['scale'] * scale)), mode=mode)
+                # add noise
+                gray_noise_prob = self.opt['gray_noise_prob2']
+                if np.random.uniform() < self.opt['gaussian_noise_prob2']:
+                    out = random_add_gaussian_noise_pt(
+                        out, sigma_range=self.opt['noise_range2'], clip=True, rounds=False, gray_prob=gray_noise_prob)
+                else:
+                    out = random_add_poisson_noise_pt(
+                        out,
+                        scale_range=self.opt['poisson_scale_range2'],
+                        gray_prob=gray_noise_prob,
+                        clip=True,
+                        rounds=False)
+
+                # JPEG compression + the final sinc filter
+                if np.random.uniform() < 0.5:
+                    # resize back + the final sinc filter
+                    mode = random.choice(['area', 'bilinear', 'bicubic'])
+                    out = F.interpolate(out, size=(ori_h // self.opt['scale'], ori_w // self.opt['scale']), mode=mode)
+                    out = filter2D(out, sinc_kernel)
+                    # JPEG compression
+                    jpeg_p = out.new_zeros(out.size(0)).uniform_(*self.opt['jpeg_range2'])
+                    out = torch.clamp(out, 0, 1)
+                    out = self.jpeger(out, quality=jpeg_p)
+                else:
+                    # JPEG compression
+                    jpeg_p = out.new_zeros(out.size(0)).uniform_(*self.opt['jpeg_range2'])
+                    out = torch.clamp(out, 0, 1)
+                    out = self.jpeger(out, quality=jpeg_p)
+                    # resize back + the final sinc filter
+                    mode = random.choice(['area', 'bilinear', 'bicubic'])
+                    out = F.interpolate(out, size=(ori_h // self.opt['scale'], ori_w // self.opt['scale']), mode=mode)
+                    out = filter2D(out, sinc_kernel)
+
+                # clamp and round
+                lq = torch.clamp((out * 255.0).round(), 0, 255) / 255.
+
+                # random crop
+                gt_size = self.opt['gt_size']
+                (gt, gt_usm), lq = paired_random_crop([gt, gt_usm], lq, gt_size, self.opt['scale'])
+
+            else:
+                # For paired data, use LQ directly
+                lq = sample_data['lq'].to(self.device)
+                gt = sample_data['gt'].to(self.device) if 'gt' in sample_data else None
+                gt_usm = self.usm_sharpener(gt) if gt is not None else None
+
+            # Append to lists
+            if gt is not None:
+                gt_list.append(gt)
+            if gt_usm is not None:
+                gt_usm_list.append(gt_usm)
+            lq_list.append(lq)
+
+        # Combine results
+        if gt_list:
+            self.gt = torch.cat(gt_list, dim=0)
+            self.gt_usm = torch.cat(gt_usm_list, dim=0)
+        self.lq = torch.cat(lq_list, dim=0).contiguous()
+
+        # Apply training pair pool if in training mode
+        if self.is_train and hasattr(self, 'queue_lr'):
+            self._dequeue_and_enqueue()
+            # sharpen self.gt again, as we have changed the self.gt with self._dequeue_and_enqueue
+            if hasattr(self, 'gt'):
+                self.gt_usm = self.usm_sharpener(self.gt)
+
     def nondist_validation(self, dataloader, current_iter, tb_logger, save_img):
         # do not use the synthetic process during validation
         self.is_train = False

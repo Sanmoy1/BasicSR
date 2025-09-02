@@ -182,7 +182,7 @@ class RealESRGANHybridDataset(data.Dataset):
 
         # Crop or pad to specified size
         h, w = img_gt.shape[0:2]
-        crop_pad_size = self.opt.get('gt_size', 400)
+        crop_pad_size = self.opt.get('gt_size', 400) # this is important
 
         # Pad if needed
         if h < crop_pad_size or w < crop_pad_size:
