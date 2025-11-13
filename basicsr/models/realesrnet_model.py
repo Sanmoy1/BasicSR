@@ -10,7 +10,103 @@ from basicsr.utils import DiffJPEG, USMSharp
 from basicsr.utils.img_process_util import filter2D
 from basicsr.utils.registry import MODEL_REGISTRY
 
+class MaskedNoiseAugmentor:
+    """
+    Adds spatially varying (partial) noise to images using random masks.
+    Supports several mask generation modes for denoising training.
+    """
 
+    def __init__(
+        self,
+        noise_std_range=(1, 25),
+        mask_prob_range=(0.3, 0.7),
+        mask_mode='blobs',  # 'blobs' | 'rectangles' | 'perlin' | 'soft'
+        use_gaussian_blur=True
+    ):
+        self.noise_std_range = noise_std_range
+        self.mask_prob_range = mask_prob_range
+        self.mask_mode = mask_mode
+        self.use_gaussian_blur = use_gaussian_blur
+
+    def __call__(self, img: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            img: torch.Tensor (C, H, W), float32, range (0, 1)
+        Returns:
+            noisy_img: torch.Tensor (C, H, W)
+        """
+        img = img.clone()
+        _, H, W = img.shape
+
+        # 1. Generate random binary/soft mask
+        mask = self._generate_mask(H, W)
+        mask = torch.from_numpy(mask).float().to(img.device)
+
+        # 2. Apply Gaussian blur (optional)
+        if self.use_gaussian_blur:
+            mask_np = mask.cpu().numpy()
+            mask_np = cv2.GaussianBlur(mask_np, (9, 9), sigmaX=3)
+            # Re-normalize & increase contrast
+            mask_np = (mask_np - mask_np.min()) / (mask_np.max() - mask_np.min() + 1e-8)
+            mask_np = (mask_np > 0.5).astype(np.float32)  # make it binary again
+            mask = torch.from_numpy(mask_np).to(img.device)
+
+        # 3. Random noise
+        noise_std = random.uniform(*self.noise_std_range) / 255.0
+        noise = torch.randn_like(img) * noise_std
+
+        # 4. Add noise only where mask == 1
+        noisy_img = img + noise * mask
+        return torch.clamp(noisy_img, 0.0, 1.0)
+
+    def _generate_mask(self, H, W):
+        """Generates mask based on selected mode."""
+        if self.mask_mode == 'blobs':
+            return self._blob_mask(H, W)
+        elif self.mask_mode == 'rectangles':
+            return self._rect_mask(H, W)
+        elif self.mask_mode == 'perlin':
+            return self._perlin_mask(H, W)
+        elif self.mask_mode == 'soft':
+            return self._soft_mask(H, W)
+        else:
+            raise ValueError(f"Unknown mask_mode '{self.mask_mode}'")
+
+    def _blob_mask(self, H, W):
+        """Random binary blobs."""
+        prob = random.uniform(*self.mask_prob_range)
+        mask = np.random.rand(H, W)
+        mask = (mask > prob).astype(np.float32)
+        return mask
+
+    def _rect_mask(self, H, W):
+        """Random rectangular regions."""
+        mask = np.zeros((H, W), np.float32)
+        n_rects = random.randint(3, 8)
+        for _ in range(n_rects):
+            x1 = random.randint(0, W - 1)
+            y1 = random.randint(0, H - 1)
+            x2 = min(W, x1 + random.randint(W // 8, W // 3))
+            y2 = min(H, y1 + random.randint(H // 8, H // 3))
+            mask[y1:y2, x1:x2] = 1.0
+        return mask
+
+    def _perlin_mask(self, H, W, scale=32):
+        """Perlin-like smooth noise mask (approximation)."""
+        grid = np.random.rand(H // scale + 1, W // scale + 1)
+        mask = cv2.resize(grid, (W, H), interpolation=cv2.INTER_CUBIC)
+        mask = (mask - mask.min()) / (mask.max() - mask.min())
+        mask = (mask > 0.5).astype(np.float32)
+        return mask
+
+    def _soft_mask(self, H, W):
+        """Soft random mask (gradual transitions)."""
+        mask = np.random.rand(H, W).astype(np.float32)
+        mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=10)
+        mask = (mask - mask.min()) / (mask.max() - mask.min())
+        return mask
+
+        
 @MODEL_REGISTRY.register(suffix='basicsr')
 class RealESRNetModel(SRModel):
     """RealESRNet Model for Real-ESRGAN: Training Real-World Blind Super-Resolution with Pure Synthetic Data.
