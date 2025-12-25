@@ -1,31 +1,33 @@
-#include <vector>
 #include <iostream>
+#include <iomanip>
+#include <cstring>
 
-void PixelShuffle(float* input, float* output, int height, int width, int in_channels, int upscale_factor)
+using namespace std;
+
+void pixel_unshuffle_nhwc( float* in, float* out,
+                          int h, int w, int c, int r = 2)
 {
-    int r = upscale_factor;
-    int out_h = height * r;
-    int out_w = width * r;
-    int in_c = in_channels;
-    int out_c = in_c / (r * r);
+    int out_h = h / r;
+    int out_w = w / r;
+    int out_c = c * r * r;
 
-    for (int h = 0; h < height; ++h)
-    {
-        for (int w = 0; w < width; ++w)
-        {
-            for (int c = 0; c < out_c; ++c)
-            {
-                for (int i = 0; i < r; ++i)
-                {
-                    for (int j = 0; j < r; ++j)
-                    {
-                        int in_index  = ((h * width + w) * in_c) + c * (r * r) + i * r + j;
-                        int out_h_idx = h * r + i;
-                        int out_w_idx = w * r + j;
-                        int out_index = ((out_h_idx * out_w + out_w_idx) * out_c) + c;
+    for (int oh = 0; oh < out_h; ++oh) {
+        for (int ow = 0; ow < out_w; ++ow) {
 
-                        output[out_index] = input[in_index];
-                    }
+            int out_base = (oh * out_w + ow) * out_c;
+
+            for (int i = 0; i < r; ++i) {
+                for (int j = 0; j < r; ++j) {
+
+                    int ih = oh * r + i;//input height
+                    int iw = ow * r + j;//input width
+
+                    int in_base = (ih * w + iw) * c;//input base
+                    int out_channel_offset = (i * r + j) * c;//output channel offset
+
+                    memcpy(out + out_base + out_channel_offset,
+                           in + in_base,
+                           sizeof(float) * c);//copy c values
                 }
             }
         }
@@ -34,45 +36,51 @@ void PixelShuffle(float* input, float* output, int height, int width, int in_cha
 
 int main()
 {
-    int height2 = 3;
-    int width2  = 3;
-    int upscale_factor = 2;
-    int in_channels = 4;   // 3x3x4 input
-    int out_channels = in_channels / (upscale_factor * upscale_factor); // -> 1
+    int H = 6, W = 6, C = 1;
+    int r = 2;
 
-    std::vector<float> output_chw(height2 * width2 * in_channels);
-    float* mpDnnOutBuf = output_chw.data();
+    int OH = H / r;
+    int OW = W / r;
+    int OC = C * r * r;
 
-    std::vector<float> output((height2 * upscale_factor) * (width2 * upscale_factor) * out_channels);
-    float* mpTileOutBuf = output.data();
+    float* input  = new float[H * W * C];
+    float* output = new float[OH * OW * OC];
 
+    // Populate input with sequential values: 1, 2, 3, ...
+    for (int i = 0; i < H * W * C; i++)
+        input[i] = i + 1;
 
-
-    // Fill NHWC input with sequential values to visualize mapping
-    int val = 0;
-    for (int h = 0; h < height2; ++h)
-    {
-        for (int w = 0; w < width2; ++w)
-        {
-            int base = ((h * width2 + w) * in_channels);
-            for (int c = 0; c < in_channels; ++c)
-            {
-                mpDnnOutBuf[base + c] = static_cast<float>(++val);
-            }
+    // Print Input
+    cout << "Input (6x6x1):" << endl;
+    for (int h = 0; h < H; ++h) {
+        for (int w = 0; w < W; ++w) {
+            cout << setw(4) << input[h * W + w];
         }
+        cout << endl;
     }
+    cout << endl;
 
-    // Perform pixel shuffle
-    PixelShuffle(mpDnnOutBuf, mpTileOutBuf, height2, width2, in_channels, upscale_factor);
+    // Pixel Unshuffle
+    pixel_unshuffle_nhwc(input, output, H, W, C, r);
 
-     // Print output matrix
-    std::cout << "Pixel shuffled matrix:\n";
-    for (int i = 0; i < (height2 * upscale_factor) * (width2 * upscale_factor) * out_channels; ++i)
-    {
-        std::cout << output[i] << " ";
-        if ((i + 1) % ((width2 * upscale_factor) * out_channels) == 0)
-            std::cout << "\n";
+    // Print Output (3x3x4)
+    cout << "Output (3x3x4):" << endl;
+
+    for (int h = 0; h < OH; ++h) {
+        for (int w = 0; w < OW; ++w) {
+
+            cout << "Block (" << h << "," << w << "): ";
+            cout << "[ ";
+
+            for (int ch = 0; ch < OC; ++ch) {
+                int idx = (h * OW + w) * OC + ch;
+                cout << output[idx];
+                if (ch < OC - 1) cout << ", ";
+            }
+
+            cout << " ]" << endl;
+        }
+        cout << endl;
     }
-    std::cout << "\n";
     return 0;
 }
