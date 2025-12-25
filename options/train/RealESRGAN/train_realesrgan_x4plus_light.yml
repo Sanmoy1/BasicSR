@@ -103,6 +103,7 @@ path:
   param_key_g: params_ema
   strict_load_g: true
   resume_state: ~
+  experiments_root: /content/drive/MyDrive/basicsr_experiments
 
 # training settings
 train:
