@@ -87,16 +87,16 @@ datasets:
   train:
     # Dataset name - descriptive name for logging
     name: DF2K+OST  # DF2K (DIV2K + Flickr2K) + OST (OutdoorSceneTraining) datasets
-    
+
     # Dataset type - which dataset class to use
     type: RealESRGANDataset  # Uses RealESRGANDataset for synthetic degradation
-    
+
     # Path to ground-truth (high-quality) images
     dataroot_gt: datasets/DF2K  # Root directory containing GT images
-    
+
     # Meta info file - lists all image paths and metadata
     meta_info: datasets/DF2K/meta_info/meta_info_DF2Kmultiscale+OST_sub.txt  # Text file with image list
-    
+
     # I/O backend configuration - how to read images
     io_backend:
       type: disk  # Read images from disk (alternatives: lmdb, memcached)
@@ -104,23 +104,23 @@ datasets:
     # ==================== FIRST BLUR KERNEL SETTINGS ====================
     # Blur kernel size - size of the blur kernel matrix
     blur_kernel_size: 21  # 21x21 kernel for first degradation blur
-    
+
     # Kernel types - different blur kernel shapes
     kernel_list: ['iso', 'aniso', 'generalized_iso', 'generalized_aniso', 'plateau_iso', 'plateau_aniso']
     # iso: isotropic Gaussian (circular blur)
     # aniso: anisotropic Gaussian (directional blur)
     # generalized_iso/aniso: generalized Gaussian distribution
     # plateau_iso/aniso: plateau-shaped blur kernels
-    
+
     # Probability for each kernel type - must sum to 1.0
     kernel_prob: [0.45, 0.25, 0.12, 0.03, 0.12, 0.03]  # Probabilities for each kernel in kernel_list
-    
+
     # Sinc filter probability - for anti-aliasing blur
     sinc_prob: 0.1  # 10% chance to use sinc filter instead of above kernels
-    
+
     # Blur sigma range - controls blur strength
     blur_sigma: [0.2, 3]  # Blur strength randomly chosen between 0.2 (weak) and 3 (strong)
-    
+
     # Beta distribution parameters for generalized Gaussian kernels
     betag_range: [0.5, 4]  # Beta parameter for generalized kernels (shape parameter)
     betap_range: [1, 2]  # Beta parameter for plateau kernels (shape parameter)
@@ -128,19 +128,19 @@ datasets:
     # ==================== SECOND BLUR KERNEL SETTINGS ====================
     # Second blur kernel size
     blur_kernel_size2: 21  # 21x21 kernel for second degradation blur
-    
+
     # Second kernel types - same options as first stage
     kernel_list2: ['iso', 'aniso', 'generalized_iso', 'generalized_aniso', 'plateau_iso', 'plateau_aniso']
-    
+
     # Second kernel probabilities
     kernel_prob2: [0.45, 0.25, 0.12, 0.03, 0.12, 0.03]  # Same distribution as first stage
-    
+
     # Second sinc filter probability
     sinc_prob2: 0.1  # 10% chance for sinc filter in second stage
-    
+
     # Second blur sigma range
     blur_sigma2: [0.2, 1.5]  # Weaker max blur than first stage (0.2 to 1.5)
-    
+
     # Second beta distribution parameters
     betag_range2: [0.5, 4]  # Same as first stage
     betap_range2: [1, 2]  # Same as first stage
@@ -151,23 +151,23 @@ datasets:
     # ==================== DATA AUGMENTATION ====================
     # Ground truth patch size - overrides the global gt_size if specified
     gt_size: 256  # Crop 256x256 patches from images
-    
+
     # Horizontal flip augmentation
     use_hflip: True  # Randomly flip images horizontally (50% chance)
-    
+
     # Rotation augmentation
     use_rot: False  # Don't use rotation augmentation (90/180/270 degree rotations)
 
     # ==================== DATA LOADER SETTINGS ====================
     # Number of worker threads per GPU for data loading
     num_worker_per_gpu: 5  # 5 parallel workers per GPU to load and preprocess data
-    
+
     # Batch size per GPU
     batch_size_per_gpu: 12  # Process 12 images per GPU in each iteration
-    
+
     # Dataset enlargement ratio - artificially increase dataset size
     dataset_enlarge_ratio: 1  # 1 means use dataset as-is, >1 repeats the dataset
-    
+
     # Prefetch mode - preload data to CPU/GPU memory
     prefetch_mode: ~  # ~ means None/disabled (alternatives: 'cpu', 'cuda')
 
@@ -176,16 +176,16 @@ datasets:
   # val:
   #   # Validation dataset name
   #   name: validation
-  #   
+  #
   #   # Validation dataset type - uses paired images (LQ and GT)
   #   type: PairedImageDataset
-  #   
+  #
   #   # Path to validation ground-truth images
   #   dataroot_gt: path_to_gt
-  #   
+  #
   #   # Path to validation low-quality images
   #   dataroot_lq: path_to_lq
-  #   
+  #
   #   # I/O backend for validation
   #   io_backend:
   #     type: disk
@@ -195,22 +195,22 @@ datasets:
 network_g:
   # Network architecture type - which generator architecture to use
   type: RRDBNet  # Residual-in-Residual Dense Block Network (from ESRGAN)
-  
+
   # Number of input channels
   num_in_ch: 3  # 3 channels for RGB input images
-  
+
   # Number of output channels
   num_out_ch: 3  # 3 channels for RGB output images
-  
+
   # Number of base feature channels
   num_feat: 64  # 64 feature channels in convolutional layers
-  
+
   # Number of RRDB blocks
   num_block: 23  # 23 Residual-in-Residual Dense Blocks (deeper = more capacity)
-  
+
   # Growth channel number in dense blocks
   num_grow_ch: 32  # 32 channels added in each dense layer
-  
+
   # Upscaling factor for the network
   scale: 2  # 2x upscaling (must match global scale setting)
 
@@ -218,13 +218,13 @@ network_g:
 network_d:
   # Discriminator architecture type
   type: UNetDiscriminatorSN  # U-Net style discriminator with Spectral Normalization
-  
+
   # Number of input channels
   num_in_ch: 3  # 3 channels for RGB images
-  
+
   # Number of base feature channels
   num_feat: 64  # 64 feature channels in discriminator
-  
+
   # Skip connections - connect encoder to decoder
   skip_connection: True  # Use skip connections for better gradient flow
 
@@ -232,13 +232,13 @@ network_d:
 path:
   # Pre-trained generator model path - for transfer learning/fine-tuning
   pretrain_network_g: experiments/pretrained_models/RealESRNet_x2plus.pth  # Path to .pth file
-  
+
   # Parameter key in the checkpoint file - which key contains the model weights
   param_key_g: params_ema  # Use EMA (Exponential Moving Average) parameters
-  
+
   # Strict loading - whether to strictly match parameter names
   strict_load_g: true  # True = all parameters must match, False = ignore missing/extra params
-  
+
   # Resume training state - path to resume from a previous training session
   resume_state: ~  # ~ means None (start fresh), or provide path to resume training
 
@@ -247,34 +247,34 @@ train:
   # EMA (Exponential Moving Average) decay rate for generator
   ema_decay: 0.999  # 0.999 means keep 99.9% of old weights, 0.1% of new weights
   # EMA creates a smoothed version of the model for better inference quality
-  
+
   # ==================== GENERATOR OPTIMIZER ====================
   # Optimizer configuration for generator network
   optim_g:
     # Optimizer type
     type: Adam  # Adam optimizer (adaptive learning rate)
-    
+
     # Learning rate
     lr: !!float 1e-4  # 0.0001 learning rate (!!float forces float type in YAML)
-    
+
     # Weight decay (L2 regularization)
     weight_decay: 0  # No weight decay (no L2 penalty)
-    
+
     # Adam beta parameters - momentum terms
     betas: [0.9, 0.99]  # beta1=0.9 (first moment), beta2=0.99 (second moment)
-  
+
   # ==================== DISCRIMINATOR OPTIMIZER ====================
   # Optimizer configuration for discriminator network
   optim_d:
     # Optimizer type
     type: Adam  # Adam optimizer
-    
+
     # Learning rate
     lr: !!float 1e-4  # 0.0001 learning rate (same as generator)
-    
+
     # Weight decay
     weight_decay: 0  # No weight decay
-    
+
     # Adam beta parameters
     betas: [0.9, 0.99]  # Same as generator
 
@@ -283,17 +283,17 @@ train:
   scheduler:
     # Scheduler type
     type: MultiStepLR  # Reduce LR at specific milestones
-    
+
     # Milestones - iterations where LR is reduced
     milestones: [400000]  # Reduce LR at 400k iterations
-    
+
     # Gamma - multiplication factor for LR reduction
     gamma: 0.5  # Multiply LR by 0.5 at each milestone (halve the learning rate)
 
   # ==================== TRAINING ITERATIONS ====================
   # Total number of training iterations
   total_iter: 400000  # Train for 400,000 iterations
-  
+
   # Warmup iterations - gradually increase LR at start
   warmup_iter: -1  # -1 means no warmup, positive number enables warmup
 
@@ -302,18 +302,18 @@ train:
   pixel_opt:
     # Loss type
     type: L1Loss  # L1 loss (Mean Absolute Error)
-    
+
     # Loss weight - how much this loss contributes to total loss
     loss_weight: 1.0  # Weight of 1.0 (standard contribution)
-    
+
     # Reduction method - how to aggregate pixel-wise losses
     reduction: mean  # Average the loss across all pixels
-  
+
   # Perceptual loss (feature matching using VGG network)
   perceptual_opt:
     # Loss type
     type: PerceptualLoss  # Perceptual loss using pre-trained VGG features
-    
+
     # Layer weights - which VGG layers to use and their weights
     layer_weights:
       # VGG layer names and their contribution weights
@@ -322,47 +322,47 @@ train:
       'conv3_4': 1    # Mid layer (medium-level features) - weight 1.0
       'conv4_4': 1    # Deep layer (high-level features) - weight 1.0
       'conv5_4': 1    # Deepest layer (semantic features) - weight 1.0
-    
+
     # VGG network type
     vgg_type: vgg19  # Use VGG19 architecture (deeper than VGG16)
-    
+
     # Input normalization - normalize inputs to VGG
     use_input_norm: true  # Normalize to ImageNet mean/std before VGG
-    
+
     # Perceptual loss weight
     perceptual_weight: !!float 1.0  # Overall weight for perceptual loss
-    
+
     # Style loss weight (Gram matrix matching)
     style_weight: 0  # 0 means no style loss (only content/perceptual)
-    
+
     # Range normalization
     range_norm: false  # Don't normalize input range
-    
+
     # Criterion for comparing features
     criterion: l1  # Use L1 distance for feature matching
-  
+
   # GAN loss (adversarial loss)
   gan_opt:
     # Loss type
     type: GANLoss  # GAN loss for adversarial training
-    
+
     # GAN type
     gan_type: vanilla  # Vanilla GAN (original GAN formulation)
     # Alternatives: 'lsgan' (least squares), 'wgan', 'hinge'
-    
+
     # Real label value - target value for real images
     real_label_val: 1.0  # Discriminator should output 1.0 for real images
-    
+
     # Fake label value - target value for generated images
     fake_label_val: 0.0  # Discriminator should output 0.0 for fake images
-    
+
     # GAN loss weight
     loss_weight: !!float 1e-1  # 0.1 weight (lower than pixel/perceptual losses)
 
   # ==================== DISCRIMINATOR TRAINING SETTINGS ====================
   # Discriminator iterations per generator iteration
   net_d_iters: 1  # Train discriminator once per generator update (1:1 ratio)
-  
+
   # Initial discriminator iterations - train D first before G
   net_d_init_iters: 0  # 0 means start training G and D together from iteration 0
   # Positive value (e.g., 5000) means train only D for first N iterations
@@ -372,7 +372,7 @@ train:
 # val:
 #   # Validation frequency - how often to run validation
 #   val_freq: !!float 5e3  # Validate every 5000 iterations
-#   
+#
 #   # Save validation images
 #   save_img: True  # Save output images during validation
 #
@@ -382,10 +382,10 @@ train:
 #     psnr:  # Metric name (can be any name)
 #       # Metric type
 #       type: calculate_psnr  # Peak Signal-to-Noise Ratio
-#       
+#
 #       # Crop border - ignore border pixels in calculation
 #       crop_border: 4  # Ignore 4 pixels on each border
-#       
+#
 #       # Y channel only - calculate on luminance channel only
 #       test_y_channel: false  # False = use RGB, True = use Y channel only
 
@@ -393,18 +393,18 @@ train:
 logger:
   # Print frequency - how often to print training logs to console
   print_freq: 100  # Print every 100 iterations
-  
+
   # Checkpoint save frequency - how often to save model checkpoints
   save_checkpoint_freq: !!float 5e3  # Save every 5000 iterations (5e3 = 5000)
-  
+
   # TensorBoard logger - enable TensorBoard visualization
   use_tb_logger: true  # True = log to TensorBoard, False = disable
-  
+
   # Weights & Biases (wandb) integration - cloud-based experiment tracking
   wandb:
     # Project name on wandb
     project: ~  # ~ means None (wandb disabled), or specify project name string
-    
+
     # Resume ID - for resuming wandb logging
     resume_id: ~  # ~ means None (new run), or provide run ID to resume
 
@@ -414,6 +414,6 @@ dist_params:
   # Backend for distributed training
   backend: nccl  # NCCL backend (NVIDIA Collective Communications Library)
   # Best for NVIDIA GPUs, alternatives: 'gloo' (CPU), 'mpi'
-  
+
   # Port for distributed communication
   port: 29500  # Port number for inter-process communication (can be any free port)
