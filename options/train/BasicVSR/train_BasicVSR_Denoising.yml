@@ -26,7 +26,7 @@ datasets:
     use_rot: true
 
     # data loader
-    num_worker_per_gpu: 4
+    num_worker_per_gpu: 2
     batch_size_per_gpu: 4
     dataset_enlarge_ratio: 200
     prefetch_mode: ~
@@ -36,6 +36,7 @@ datasets:
     type: VideoRecurrentTestDataset
     dataroot_gt: /content/drive/MyDrive/basicsr/dataset/REDS/train_sharp
     dataroot_lq: /content/drive/MyDrive/basicsr/dataset/REDS/train_sharp_bicubic/X4 # Replace with your noisy data path
+    cache_data: false
     io_backend:
       type: disk
 
