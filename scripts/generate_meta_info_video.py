@@ -58,11 +58,11 @@ if __name__ == '__main__':
     # --- CONFIGURATION ---
     # 1. Path to your CLEAN/BS videos (Ground Truth)
     #    Example: 'datasets/MyVideoDataset/train_sharp'
-    my_data_root = '/content/drive/MyDrive/basicsr/dataset/REDS/train_sharp'
+    my_data_root = '/content/drive/MyDrive/basicsr/dataset/REDS/val_sharp'
 
     # 2. Where to save the text file
     #    Example: 'basicsr/data/meta_info/meta_info_MyDataset.txt'
-    my_save_path = 'basicsr/data/meta_info/meta_info_Video_GT.txt'
+    my_save_path = '/content/BasicSR/basicsr/data/meta_info/meta_info_Video_GT1.txt'
     # ---------------------
 
     generate_video_meta_info(my_data_root, my_save_path)
